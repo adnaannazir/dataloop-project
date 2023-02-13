@@ -14,13 +14,18 @@ def create_dataset(project_name, dataset_name):
         dl.Dataset: The created dataset object
     """
 
-    projects = dl.projects.list()
-    project = next((p for p in projects if p.name == project_name), None)
-    if project is None:
-        raise ValueError(f"Project '{project_name}' not found")
-    dataset = next((d for d in project.datasets.list() if d.name == dataset_name), None)
-    if dataset is None:
+    try:
+        project = dl.projects.get(project_name=project_name)
+
+    except:
+        raise Exception(f"Project '{project_name}' not found")
+
+    try:
+        dataset = project.datasets.get(dataset_name=dataset_name)
+    
+    except:
         dataset = project.datasets.create(dataset_name=dataset_name)
+
     return dataset
 
 
@@ -33,9 +38,11 @@ def add_utm_info(dataset, items):
         items (list): A list of items to add metadata to
     """
 
-    for item in items:
-        item.metadata.setdefault('user', {})['UTM'] = datetime.now().strftime("%m/%d/%Y, %H:%M:%S")
-        item.update()
+    metadata = {"user": {"UTM": datetime.now().strftime("%m/%d/%Y, %H:%M:%S")}}
+
+    filters = dl.Filters()
+    filters.add('item_id', 'in', [item.id for item in items])
+    dataset.items.update(filters=filters, update_values = metadata)
 
 
 def add_class_label(label, items):
@@ -46,10 +53,20 @@ def add_class_label(label, items):
         label (str): The label for the classification annotation.
         items (list of dl.Item): The list of items to add the classification to.
     """
+
     for item in items:
         builder = item.annotations.builder()
         builder.add(annotation_definition=dl.Classification(label=label))
         item.annotations.upload(builder)
+
+
+def upload_annotations(item,builder):
+    """
+    We use the upload method to upload multiple annotations to Dataloop in a single API call. 
+    This way, we can upload multiple annotations in a more efficient way than uploading them one by one.
+    """
+    # Upload the annotations to Dataloop
+    item.annotations.upload(builder)
 
 
 def add_random_keypoints_with_label(items,label,n):
@@ -62,12 +79,15 @@ def add_random_keypoints_with_label(items,label,n):
         n: The number of random points
     """
     item = random.choice(items)
+    builder = item.annotations.builder()
+
     for _ in range(n):
         x = random.randint(0, item.metadata['system']['width'])
         y = random.randint(0, item.metadata['system']['height'])
-        builder = item.annotations.builder()
         builder.add(annotation_definition=dl.Point(x=x, y=y, label=label))
-        item.annotations.upload(builder)
+    
+    upload_annotations(item,builder)
+    
 
 
 def select_images_by_label(dataset, label):
@@ -94,9 +114,11 @@ def get_all_point_annotations(dataset):
     Parameters:
         dataset (dl.Dataset): The dataset object that contains the items
     """
+    
     filters = dl.Filters()
     filters.add_join(field='type', values='point')
     pages = dataset.items.list(filters=filters)
+
     for page in pages:
         for item in page: 
             item.print()
@@ -123,7 +145,7 @@ def main():
     dataset.items.upload(local_path='/Users/Shared/dataloop-dataset')
     items = dataset.items.list()[0]
 
-    ##
+
     add_utm_info(dataset, items)
     add_class_label('class1', items[:2])
     add_class_label('class2', items[2:])
